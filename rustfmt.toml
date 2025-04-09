@@ -1,0 +1,5 @@
+max_width = 140
+use_small_heuristics = "Max"
+tab_spaces = 2
+newline_style = "unix"
+reorder_imports = true

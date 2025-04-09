@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package router.v1;
+
+import "router/v1/model.proto";
+
+// option java_multiple_files = true;
+// option java_package = "bb.byreal.dex";
+
+service RouterService
+{
+    // 询价服务
+    rpc QuotePrice(router.v1.QuotePriceRequest) returns (router.v1.QuotePriceResponse);
+
+    // 构建交易：生成用于交换的交易数据
+    rpc CreateSwapTransaction(router.v1.CreateSwapTransactionRequest) returns (router.v1.CreateSwapTransactionResponse);
+
+    // 获取仓位信息
+    rpc ListLinePosition(router.v1.ListLinePositionRequest) returns (router.v1.ListLinePositionResponse);
+}
