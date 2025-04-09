@@ -102,10 +102,10 @@ pub async fn get_nacos_config() -> NacosConfig {
 /// 读取nacos配置, 同步
 /// 在同步代码中使用，该方式会阻塞当前线程，导致性能降低
 pub fn get_nacos_config_slow_sync() -> NacosConfig {
-    // 使用 tokio::runtime::Handle 来阻塞运行异步代码
-    let handle = tokio::runtime::Handle::current();
-    handle.block_on(async {
-        let nacos_config = nacos_global_config.read().await;
-        nacos_config.clone()
-    })
+  // 使用 tokio::runtime::Handle 来阻塞运行异步代码
+  let handle = tokio::runtime::Handle::current();
+  handle.block_on(async {
+    let nacos_config = nacos_global_config.read().await;
+    nacos_config.clone()
+  })
 }

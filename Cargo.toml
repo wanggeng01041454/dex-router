@@ -15,6 +15,11 @@ raydium-amm-v3 = {git = "https://github.com/wanggeng01041454/raydium-clmm.git", 
 nacos-sdk = "0.5.0"
 anyhow = "1.0.97"
 lazy_static = "1.5.0"
+rand = "0.9.0"
+solana-sdk = "2.2.2"
+solana-client = "2.2.7"
+solana-account-decoder-client-types = "2.2.7"
+spl-token-2022 = "8.0.1"
 
 # 构建依赖
 [build-dependencies]

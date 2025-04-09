@@ -20,7 +20,6 @@ const JSON_RPC_PORT: u16 = 9981;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-
   // 初始化 Nacos 配置
   nacos_config::entrance::init_nacos().await?;
 
