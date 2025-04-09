@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package router.v1;
 
-import "router/v1/model.proto";
+import "rpc/proto/router/v1/model.proto";
 
 // option java_multiple_files = true;
 // option java_package = "bb.byreal.dex";
@@ -16,5 +16,6 @@ service RouterService
     rpc CreateSwapTransaction(router.v1.CreateSwapTransactionRequest) returns (router.v1.CreateSwapTransactionResponse);
 
     // 获取仓位信息
-    rpc ListLinePosition(router.v1.ListLinePositionRequest) returns (router.v1.ListLinePositionResponse);
+    // todo: 这个应该放在 query 里
+    // rpc ListLinePosition(router.v1.ListLinePositionRequest) returns (router.v1.ListLinePositionResponse);
 }

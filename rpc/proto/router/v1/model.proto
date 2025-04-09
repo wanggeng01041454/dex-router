@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package router.v1;
 
-import "base/v1/model.proto";
+import "rpc/proto/base/v1/model.proto";
 // option java_multiple_files = true;
 // option java_package = "bb.byreal.dex";
 

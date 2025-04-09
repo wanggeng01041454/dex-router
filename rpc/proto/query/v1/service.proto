@@ -3,7 +3,7 @@ syntax = "proto3";
 
 package query.v1;
 
-import "query/v1/model.proto";
+import "rpc/proto/query/v1/model.proto";
 
 // option java_multiple_files = true;
 // option java_package = "bb.byreal.dex";

@@ -2,12 +2,15 @@ use std::net::SocketAddr;
 
 use json_rpc::{JsonRpcRequest, JsonRpcResponse};
 use router::router::LocalIndexRouter;
-use swap::router_service_server::RouterServiceServer;
+use rpc_proto::router_service_server::RouterServiceServer;
 use tonic::transport::Server;
 use warp::Filter;
 
-pub mod swap {
-  tonic::include_proto!("swap"); // 导入生成的代码
+// 导入生成的代码
+pub mod rpc_proto {
+  tonic::include_proto!("base.v1");
+  tonic::include_proto!("query.v1");
+  tonic::include_proto!("router.v1");
 }
 
 mod constants;
