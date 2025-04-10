@@ -16,7 +16,7 @@ use super::types::PoolInfo;
 
 // the top level state of the swap, the results of which are recorded in storage at the end
 #[derive(Debug)]
-pub struct LocalSwapState {
+pub struct SwapState {
   // the amount remaining to be swapped in/out of the input/output asset
   pub amount_specified_remaining: u64,
   // the amount already swapped out/in of the output/input asset
@@ -27,7 +27,10 @@ pub struct LocalSwapState {
   pub tick: i32,
   // the current liquidity in range
   pub liquidity: u128,
+  // swap过程中，fee 的累加值
+  pub fee_amount: u64,
 }
+
 #[derive(Default)]
 struct StepComputations {
   // the price at the beginning of the step
@@ -47,21 +50,20 @@ struct StepComputations {
 }
 
 impl PoolInfo {
-  //todo: 调整为self,
   //todo: 将需要的参数尽量存在 pool_info 中
+  //todo: swap_compute 还需要返回的结果：输入代币还剩余多少，swap fee 用了多少， swap后的价格是多少
   /// 计算 swap 的结果
   pub fn swap_compute(
+    &self,
     zero_for_one: bool,
     is_base_input: bool,
     is_pool_current_tick_array: bool,
-    fee: u32,
     amount_specified: u64,
     current_vaild_tick_array_start_index: i32,
     sqrt_price_limit_x64: u128,
-    pool_state: &PoolState,
     tickarray_bitmap_extension: &TickArrayBitmapExtension,
     tick_arrays: &mut VecDeque<TickArrayState>,
-  ) -> Result<(u64, VecDeque<i32>)> {
+  ) -> Result<(SwapState, VecDeque<i32>)> {
     if amount_specified == 0 {
       return Err(anyhow!("amountSpecified must not be 0"));
     }
@@ -74,25 +76,26 @@ impl PoolInfo {
       if sqrt_price_limit_x64 < tick_math::MIN_SQRT_PRICE_X64 {
         return Err(anyhow!("sqrt_price_limit_x64 must greater than MIN_SQRT_PRICE_X64"));
       }
-      if sqrt_price_limit_x64 >= pool_state.sqrt_price_x64 {
+      if sqrt_price_limit_x64 >= self.dynamic_info.sqrt_price_x64 {
         return Err(anyhow!("sqrt_price_limit_x64 must smaller than current"));
       }
     } else {
       if sqrt_price_limit_x64 > tick_math::MAX_SQRT_PRICE_X64 {
         return Err(anyhow!("sqrt_price_limit_x64 must less than MAX_SQRT_PRICE_X64"));
       }
-      if sqrt_price_limit_x64 <= pool_state.sqrt_price_x64 {
+      if sqrt_price_limit_x64 <= self.dynamic_info.sqrt_price_x64 {
         return Err(anyhow!("sqrt_price_limit_x64 must greater than current"));
       }
     }
     let mut tick_match_current_tick_array = is_pool_current_tick_array;
 
-    let mut state = LocalSwapState {
+    let mut state = SwapState {
       amount_specified_remaining: amount_specified,
       amount_calculated: 0,
-      sqrt_price_x64: pool_state.sqrt_price_x64,
-      tick: pool_state.tick_current,
-      liquidity: pool_state.liquidity,
+      sqrt_price_x64: self.dynamic_info.sqrt_price_x64,
+      tick: self.dynamic_info.tick_current,
+      liquidity: self.dynamic_info.liquidity,
+      fee_amount: 0,
     };
 
     let mut tick_array_current = tick_arrays.pop_front().unwrap();
@@ -115,20 +118,22 @@ impl PoolInfo {
       let mut step = StepComputations::default();
       step.sqrt_price_start_x64 = state.sqrt_price_x64;
       // save the bitmap, and the tick account if it is initialized
-      let mut next_initialized_tick =
-        if let Some(tick_state) = tick_array_current.next_initialized_tick(state.tick, pool_state.tick_spacing, zero_for_one).unwrap() {
-          Box::new(*tick_state)
+      let mut next_initialized_tick = if let Some(tick_state) =
+        tick_array_current.next_initialized_tick(state.tick, self.base_info.tick_spacing, zero_for_one).unwrap()
+      {
+        Box::new(*tick_state)
+      } else {
+        // todo, 这个逻辑需要仔细考量
+        if !tick_match_current_tick_array {
+          tick_match_current_tick_array = true;
+          Box::new(*tick_array_current.first_initialized_tick(zero_for_one).unwrap())
         } else {
-          if !tick_match_current_tick_array {
-            tick_match_current_tick_array = true;
-            Box::new(*tick_array_current.first_initialized_tick(zero_for_one).unwrap())
-          } else {
-            Box::new(TickState::default())
-          }
-        };
+          Box::new(TickState::default())
+        }
+      };
       if !next_initialized_tick.is_initialized() {
-        let current_vaild_tick_array_start_index = pool_state
-          .next_initialized_tick_array_start_index(&Some(*tickarray_bitmap_extension), current_vaild_tick_array_start_index, zero_for_one)
+        let current_vaild_tick_array_start_index = self
+          .next_initialized_tick_array_start_index(tickarray_bitmap_extension, current_vaild_tick_array_start_index, zero_for_one)
           .unwrap();
         tick_array_current = tick_arrays.pop_front().unwrap();
         if current_vaild_tick_array_start_index.is_none() {
@@ -164,13 +169,15 @@ impl PoolInfo {
         target_price,
         state.liquidity,
         state.amount_specified_remaining,
-        fee,
+        self.base_info.trade_fee_rate,
         is_base_input,
         zero_for_one,
         1,
       )
       .unwrap();
       state.sqrt_price_x64 = swap_step.sqrt_price_next_x64;
+      state.fee_amount += swap_step.fee_amount;
+
       step.amount_in = swap_step.amount_in;
       step.amount_out = swap_step.amount_out;
       step.fee_amount = swap_step.fee_amount;
@@ -201,7 +208,7 @@ impl PoolInfo {
       loop_count += 1;
     }
 
-    Ok((state.amount_calculated, tick_array_start_index_vec))
+    Ok((state, tick_array_start_index_vec))
   }
 
   pub fn get_pda_tick_array_address(&self, tick_array_start_index: i32) -> Pubkey {
@@ -210,6 +217,29 @@ impl PoolInfo {
       &BYREAL_CLMM_PROGRAM_ID,
     )
     .0
+  }
+
+  pub fn get_tick_array_dequeue(&self, first_tick_array_start_index: i32, zero_for_one: bool) -> Result<VecDeque<TickArrayState>> {
+    let mut tick_array_dequeue = VecDeque::new();
+
+    if zero_for_one {
+      // 正序遍历 tick-array
+      for i in 0..self.dynamic_info.all_tick_array_state.len() {
+        let tick_array = &self.dynamic_info.all_tick_array_state[i];
+        if tick_array.start_tick_index >= first_tick_array_start_index {
+          tick_array_dequeue.push_back(tick_array.clone());
+        }
+      }
+    } else {
+      // 反序遍历 tick-array
+      for i in (self.dynamic_info.all_tick_array_state.len() - 1)..=0 {
+        let tick_array = &self.dynamic_info.all_tick_array_state[i];
+        if tick_array.start_tick_index <= first_tick_array_start_index {
+          tick_array_dequeue.push_back(tick_array.clone());
+        }
+      }
+    }
+    Ok(tick_array_dequeue)
   }
 
   // the range of tick array start index that default tickarray bitmap can represent
@@ -242,7 +272,7 @@ impl PoolInfo {
 
   pub fn next_initialized_tick_array_start_index(
     &self,
-    tickarray_bitmap_extension: &Option<TickArrayBitmapExtension>,
+    tickarray_bitmap_extension: &TickArrayBitmapExtension,
     mut last_tick_array_start_index: i32,
     zero_for_one: bool,
   ) -> Result<Option<i32>> {
@@ -260,12 +290,7 @@ impl PoolInfo {
       }
       last_tick_array_start_index = start_index;
 
-      if tickarray_bitmap_extension.is_none() {
-        // return err!(ErrorCode::MissingTickArrayBitmapExtensionAccount);
-        return Err(anyhow!("Missing TickArrayBitmapExtension Account"));
-      }
-
-      let (is_found, start_index) = tickarray_bitmap_extension.unwrap().next_initialized_tick_array_from_one_bitmap(
+      let (is_found, start_index) = tickarray_bitmap_extension.next_initialized_tick_array_from_one_bitmap(
         last_tick_array_start_index,
         self.base_info.tick_spacing,
         zero_for_one,
@@ -283,11 +308,11 @@ impl PoolInfo {
 
   pub fn get_first_initialized_tick_array(
     &self,
-    tickarray_bitmap_extension: &Option<TickArrayBitmapExtension>,
+    tickarray_bitmap_extension: &TickArrayBitmapExtension,
     zero_for_one: bool,
   ) -> Result<(bool, i32)> {
     let (is_initialized, start_index) = if self.is_overflow_default_tickarray_bitmap(vec![self.dynamic_info.tick_current]) {
-      tickarray_bitmap_extension.unwrap().check_tick_array_is_initialized(
+      tickarray_bitmap_extension.check_tick_array_is_initialized(
         TickArrayState::get_array_start_index(self.dynamic_info.tick_current, self.base_info.tick_spacing),
         self.base_info.tick_spacing,
       )?
