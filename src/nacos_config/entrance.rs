@@ -15,34 +15,13 @@ lazy_static::lazy_static! {
 
 /// 初始化 nacos
 pub async fn init_nacos() -> Result<()> {
-  // 尝试从环境变量读取 NACOS_SERVER_ADDR
-  let nacos_server_addr = match env::var("NACOS_SERVER_ADDR") {
-    Ok(addr) => addr,
-    Err(_) => "127.0.0.1:8848".to_string(), // 默认值
-  };
-
-  let nacos_namespace = match env::var("NACOS_NAMESPACE") {
-    Ok(namespace) => namespace,
-    Err(_) => "sbu-test-5".to_string(), // 默认值
-  };
-
-  let nacos_group = match env::var("NACOS_GROUP") {
-    Ok(group) => group,
-    Err(_) => "dex-indexer".to_string(), // 默认值
-  };
-
-  let nacos_data_id = match env::var("NACOS_DATA_ID") {
-    Ok(data_id) => data_id,
-    Err(_) => "dex-indexer".to_string(), // 默认值
-  };
-  let nacos_user = match env::var("NACOS_USER") {
-    Ok(user) => user,
-    Err(_) => "nacos".to_string(), // 默认值
-  };
-  let nacos_password = match env::var("NACOS_PASSWORD") {
-    Ok(password) => password,
-    Err(_) => "nacos".to_string(), // 默认值
-  };
+  // 使用 unwrap_or 方法简化代码
+  let nacos_server_addr = env::var("NACOS_SERVER_ADDR").unwrap_or_else(|_| "nacos.test.infra.ww5sawfyut0k.bitsvc.io:8848".to_string());
+  let nacos_namespace = env::var("NACOS_NAMESPACE").unwrap_or_else(|_| "sbu-test-5".to_string());
+  let nacos_group = env::var("NACOS_GROUP").unwrap_or_else(|_| "byreal-dex-router".to_string());
+  let nacos_data_id = env::var("NACOS_DATA_ID").unwrap_or_else(|_| "byreal-dex-router".to_string());
+  let nacos_user = env::var("NACOS_USER").unwrap_or_else(|_| "nacos".to_string());
+  let nacos_password = env::var("NACOS_PASSWORD").unwrap_or_else(|_| "nacos".to_string());
 
   println!("Nacos server address: {}", nacos_server_addr);
   println!("Nacos namespace: {}", nacos_namespace);

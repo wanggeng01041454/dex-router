@@ -1,14 +1,18 @@
-use std::collections::HashMap;
+use std::{
+  collections::HashMap,
+  fmt::{self, Debug},
+};
 
 use anchor_lang::prelude::*;
 use raydium_amm_v3::states::{TickArrayBitmapExtension, TickArrayState};
-use spl_token_2022::extension::transfer_fee::TransferFeeConfig;
+
+use crate::service::core::types::MintAccountBaseInfo;
 
 pub const POOL_VERSION_CLMM: u8 = 6; // Constant for CLMM pool version
 pub const POOL_VERSION_CPMM: u8 = 7; // Constant for CPMM pool version
 
 /// 池子的静态信息
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 pub struct PoolBaseInfo {
   pub id: Pubkey,  // Unique identifier for the pool
   pub version: u8, // Version of the pool (6 for CLMM, 7 for CPMM)
@@ -16,12 +20,11 @@ pub struct PoolBaseInfo {
   // Which config the pool belongs, 拼装交易时需要
   pub amm_config: Pubkey,
 
+  pub open_time: u64, // The time when the pool was opened
+
   pub tick_spacing: u16,
-  // todo, mint_a 替换为 TokenBaseInfo
-  pub mint_a: Pubkey,             // Token A's mint address
-  pub mint_a_info: TokenBaseInfo, // Token A's mint info
-  pub mint_b: Pubkey,             // Token B's mint address
-  pub mint_b_info: TokenBaseInfo, // Token B's mint info
+  pub mint_a_info: MintAccountBaseInfo, // Token A's mint info
+  pub mint_b_info: MintAccountBaseInfo, // Token B's mint info
 
   /// Token pair vault
   pub token_vault_a: Pubkey,
@@ -71,42 +74,82 @@ pub struct PoolInfo {
 // todo: poolInfo缓存在本地， 新增时，链解析后端要推送
 // todo: token 信息也要在redis中缓存
 
-/// 代币的基本信息
-#[derive(Debug, Default, Clone, Copy)]
-pub struct TokenBaseInfo {
-  pub mint: Pubkey,       // Token mint address
-  pub program_id: Pubkey, // Program ID of the token
-  pub decimal: u8,        // Decimal precision of the token
-
-  pub transfer_fee_config: Option<TransferFeeConfig>, // Optional transfer fee configuration
-}
-
 /// 路由跳转的路径信息
 #[derive(Default, Clone)]
 pub struct RoutePathItem {
   /// 路由跳转mint
-  pub route_mint: Pubkey,
-
-  /// 路由跳转mint的 program id
-  pub mint_program_id: Pubkey,
+  pub route_mint: MintAccountBaseInfo,
 
   /// 所有 input mint 和 route mint 的 pool
   pub input_mint_pools: Vec<PoolInfo>,
 
   /// 所有 output mint 和 route mint 的 pool
   pub output_mint_pools: Vec<PoolInfo>,
-
-  /// 精度
-  pub decimal: u8,
 }
 
 /// 计算路由返回的信息
 #[derive(Default, Clone)]
 pub struct AllRoutePathInfo {
   /// 直接路径
-  pub direct_path: Vec<PoolInfo>,
+  pub direct_paths: Vec<PoolInfo>,
 
   /// 间接路径, 即中转路径
   /// hashmap key 是中转路径的 mint
-  pub route_path_map: HashMap<String, RoutePathItem>,
+  pub route_paths_map: HashMap<String, RoutePathItem>,
 }
+impl fmt::Display for AllRoutePathInfo {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    for idx in 0..self.direct_paths.len() {
+      write!(
+        f,
+        "direct_paths[{}]: {}, {}\n",
+        idx,
+        self.direct_paths[idx].base_info.mint_a_info.mint.to_string(),
+        self.direct_paths[idx].base_info.mint_b_info.mint.to_string()
+      )?;
+    }
+    for (key, value) in &self.route_paths_map {
+      write!(f, "route_paths_map[{}]:\n", key)?;
+      for idx in 0..value.input_mint_pools.len() {
+        write!(
+          f,
+          "input_mint_pools[{}]: {}, {}\n",
+          idx,
+          value.input_mint_pools[idx].base_info.mint_a_info.mint.to_string(),
+          value.input_mint_pools[idx].base_info.mint_b_info.mint.to_string()
+        )?;
+      }
+      for idx in 0..value.output_mint_pools.len() {
+        write!(
+          f,
+          "output_mint_pools[{}]: {}, {}\n",
+          idx,
+          value.output_mint_pools[idx].base_info.mint_a_info.mint.to_string(),
+          value.output_mint_pools[idx].base_info.mint_b_info.mint.to_string()
+        )?;
+      }
+    }
+
+    Ok(())
+  }
+}
+
+impl AllRoutePathInfo {
+  pub fn is_empty(&self) -> bool {
+    self.direct_paths.is_empty() && self.route_paths_map.is_empty()
+  }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TickLiquidityInfo {
+  pub tick_index: i32,
+  pub liquidity: u128,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct OutputTickLiquidityInfo {
+  pub tick_index: i32,
+  pub tick_price: String,
+  pub liquidity: u128,
+}
+pub const TICK_ARRAY_SIZE: i32 = 60;

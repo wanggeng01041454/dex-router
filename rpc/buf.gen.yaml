@@ -1,0 +1,30 @@
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: code.bydev.io/byreal/solana-dex-router_service/proto
+    - file_option: java_package_prefix
+      value: bb.byreal.dex
+    - file_option: java_multiple_files
+      value: false 
+
+plugins:
+  # ✅ Go 插件
+  - remote: buf.build/protocolbuffers/go
+    out: gen/go
+    opt: paths=source_relative
+  - remote: buf.build/connectrpc/go
+    out: gen/go
+    opt: paths=source_relative
+  
+  # ✅ Java 插件（用于 gRPC 或 protobuf）
+  - remote: buf.build/protocolbuffers/java
+    out: gen/java
+    opt:
+  - remote: buf.build/community/neoeinstein-prost
+    out: ../src/rpc
+  - remote: buf.build/community/neoeinstein-tonic:v0.4.1
+    out: ../src/rpc
+inputs:
+  - directory: proto

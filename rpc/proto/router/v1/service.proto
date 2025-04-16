@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package router;
+
+import "router/v1/model.proto";
+
+// option java_multiple_files = true;
+// option java_package = "bb.byreal.dex";
+
+service RouterService
+{
+    // 询价服务
+    rpc QuotePrice(router.QuotePriceRequest) returns (router.QuotePriceResponse);
+
+    // 构建交易：生成用于交换的交易数据
+    rpc CreateSwapTransaction(router.CreateSwapTransactionRequest) returns (router.CreateSwapTransactionResponse);
+
+
+}

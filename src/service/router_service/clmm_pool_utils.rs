@@ -1,4 +1,5 @@
-use anchor_lang::prelude::AccountMeta;
+use std::fmt;
+
 use anyhow::Result;
 
 use raydium_amm_v3::libraries::{MAX_SQRT_PRICE_X64, MIN_SQRT_PRICE_X64, MulDiv};
@@ -9,9 +10,15 @@ use super::types::PoolInfo;
 
 /// 计算 swap 的结果集合
 #[derive(Debug, Default)]
-pub struct ComputeAmountOutResult {
+pub struct OneStepSwapResult {
   pub input_mint: Pubkey,
   pub output_mint: Pubkey,
+
+  // 指定的数量是基于 input 还是 output
+  pub base_input: bool,
+
+  // 指定的数量
+  pub specified_amount: u64,
 
   // the amount remaining to be swapped in/out of the input/output asset
   pub amount_specified_remaining: u64,
@@ -36,17 +43,42 @@ pub struct ComputeAmountOutResult {
   /// 计算时涉及的 tick-array 的 pubkey
   pub tick_array_keys: Vec<Pubkey>,
 }
+
+impl fmt::Display for OneStepSwapResult {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    write!(
+      f,
+      "OneStepSwapResult {{ input_mint: {}, output_mint: {}, base_input: {}, specified_amount: {}, amount_specified_remaining: {}, amount_calculated: {}, before_sqrt_price_x64: {}, before_tick: {}, before_liquidity: {}, after_sqrt_price_x64: {}, after_tick: {}, after_liquidity: {}, fee_amount: {} }}",
+      self.input_mint,
+      self.output_mint,
+      self.base_input,
+      self.specified_amount,
+      self.amount_specified_remaining,
+      self.amount_calculated,
+      self.before_sqrt_price_x64,
+      self.before_tick,
+      self.before_liquidity,
+      self.after_sqrt_price_x64,
+      self.after_tick,
+      self.after_liquidity,
+      self.fee_amount
+    )
+  }
+}
+
 // todo: 可能还需要expiration_time
 /// 根据输入的mint和数量计算输出的mint和数量
-pub fn compute_amount_out(
+/// `base_input` specified_amount 是 input-amount 还是 output-amount
+pub fn compute_another_amount(
   pool: &PoolInfo,
   input_mint: &Pubkey,
-  input_amount: u64,
+  base_input: bool,
+  specified_amount: u64,
   epoch_info: &EpochInfo,
   sqrt_price_x64_limit: Option<u128>,
-) -> Result<ComputeAmountOutResult> {
+) -> Result<OneStepSwapResult> {
   // Check if the input mint is either mint_a or mint_b
-  let zero_for_one = pool.base_info.mint_a == *input_mint;
+  let zero_for_one = pool.base_info.mint_a_info.mint == *input_mint;
   let (base_fee_config, out_fee_config) = if zero_for_one {
     (&pool.base_info.mint_a_info.transfer_fee_config, &pool.base_info.mint_b_info.transfer_fee_config)
   } else {
@@ -57,8 +89,11 @@ pub fn compute_amount_out(
   let sqrt_price_x64_limit =
     sqrt_price_x64_limit.unwrap_or_else(|| if zero_for_one { MIN_SQRT_PRICE_X64 + 1 } else { MAX_SQRT_PRICE_X64 - 1 });
 
-  // 扣除 transfer-fee, 成为实际的 input_amount
-  let GetTransferAmountFeeResult { amount: real_amount_in, .. } = get_transfer_amount_fee(input_amount, base_fee_config, epoch_info, false);
+  // 指定 input-amount时，需要扣除 transfer-fee, 成为实际的 input_amount
+  // 指定 output-amount时，需要添加 transfer-fee, 成为实际的 output_amount
+  let add_fee = !base_input;
+  let GetTransferAmountFeeResult { amount: real_amount_specified, .. } =
+    get_transfer_amount_fee(specified_amount, base_fee_config, epoch_info, add_fee);
 
   // 真正的计算
   // 获取第一个初始化的tickArray, 根据swap方向
@@ -76,22 +111,26 @@ pub fn compute_amount_out(
     zero_for_one,
     true,
     is_exist,
-    real_amount_in,
+    real_amount_specified,
     first_tick_array_start_index,
     sqrt_price_x64_limit,
     &pool.dynamic_info.tick_array_bitmap_extension,
     &mut tick_array_dequeue,
   )?;
 
-  // 扣除 transfer-fee, 成为实际的 output_amount
+  // 指定 input-amount时，需要扣除 transfer-fee, 成为实际的 input_amount
+  // 指定 output-amount时，需要添加 transfer-fee, 成为实际的 output_amount
   let GetTransferAmountFeeResult { amount: real_amount_out, .. } =
-    get_transfer_amount_fee(swap_state.amount_calculated, out_fee_config, epoch_info, true);
+    get_transfer_amount_fee(swap_state.amount_calculated, out_fee_config, epoch_info, add_fee);
 
-  let tick_array_keys = tick_array_start_index_vec.into_iter().map(|index| pool.get_pda_tick_array_address(index)).collect();
+  let tick_array_keys =
+    tick_array_start_index_vec.into_iter().map(|index| PoolInfo::get_pda_tick_array_address(&pool.base_info.id, index)).collect();
 
-  Ok(ComputeAmountOutResult {
-    input_mint: if zero_for_one { pool.base_info.mint_a } else { pool.base_info.mint_b },
-    output_mint: if zero_for_one { pool.base_info.mint_b } else { pool.base_info.mint_a },
+  Ok(OneStepSwapResult {
+    input_mint: if zero_for_one { pool.base_info.mint_a_info.mint } else { pool.base_info.mint_b_info.mint },
+    output_mint: if zero_for_one { pool.base_info.mint_b_info.mint } else { pool.base_info.mint_a_info.mint },
+    base_input: base_input,
+    specified_amount,
     amount_specified_remaining: swap_state.amount_specified_remaining,
     amount_calculated: real_amount_out,
     before_sqrt_price_x64: pool.dynamic_info.sqrt_price_x64,

@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package query;
+
+import "query/v1/model.proto";
+
+// option java_multiple_files = true;
+// option java_package = "bb.byreal.dex";
+
+// SwapService 定义了与交换相关的服务
+service QueryService {
+  // 确认交易未被篡改：验证签名后的交易是否合法
+  rpc CheckTx(query.CheckTxRequest) returns (query.CheckTxResponse);
+
+  // 获取代币的基本信息
+  rpc GetContractInfo(query.GetContractInfoRequest) returns (query.GetContractInfoResponse);
+
+  // 获取仓位信息
+  rpc ListLinePosition(query.ListLinePositionRequest) returns (query.ListLinePositionResponse);
+}

@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+package router;
+
+import "base/v1/model.proto";
+// option java_multiple_files = true;
+// option java_package = "bb.byreal.dex";
+
+// 询价请求消息
+message QuotePriceRequest {
+  string input_mint = 1; // 输入币种地址，base58编码
+  string output_mint = 2; // 输出币种地址，base58编码
+  string amount = 3; // base代币数量
+  bool is_base_input = 4; // amount 是指定的 input_mint 还是 output_mint
+  TxVersion txVersion = 5; // 固定为 V0, todo: 删除
+  int64 slippage_bps = 6; // 滑点，以 0.01% 为基点
+}
+
+// ApiSwapV1OutSuccess 表示成功的交换响应
+message QuotePriceResponse {
+  base.CommonResult result = 1;
+  string version = 2; // 'V0' 或 'V1'
+  uint64 open_time = 3; // 毫秒时间戳
+  SwapV1Out data = 4; // 交换的具体数据
+}
+
+// 询价响应消息
+message SwapV1Out {
+  //todo: 直接修改为布尔值？
+  enum SwapType {
+    SWAP_TYPE_BASE_IN_UNSPECIFIED = 0; // 对应 "BaseIn"
+    SWAP_TYPE_BASE_OUT_UNSPECIFIED = 1; // 对应 "BaseOut"
+  }
+
+  SwapType swap_type = 1; // 使用 enum 类型
+  string input_mint = 2;
+  string input_amount = 3;
+  string output_mint = 4;
+  string output_amount = 5;
+  string other_amount_threshold = 6;
+  int64 slippage_bps = 7; // 滑点，以 0.01% 为基点
+  // todo: 这里应该是约定好的定点数吧？
+  int64 price_impact_pct = 8; // 使用 double 对应 TypeScript 的 number
+
+  repeated RoutePlan route_plan = 9; // 数组类型使用 repeated
+
+  message RoutePlan {
+    string pool_id = 1;
+    string input_mint = 2;
+    string output_mint = 3;
+    string fee_mint = 4;
+    // todo: uint32 才合适
+    int32 fee_rate = 5; // 使用 int32 对应 TypeScript 的 number
+    string fee_amount = 6;
+
+    // 表示询价计算过中涉及的账户
+    repeated string remaining_accounts = 7; // 可选字段使用 repeated
+    string last_pool_price_x64 = 8; // 可选字段
+  }
+}
+
+// CreateSwapTransactionRequest 包含创建交换交易所需的参数
+message CreateSwapTransactionRequest {
+  string wallet = 1; // 钱包地址
+  string compute_unit_price_micro_lamports = 2; // 交易优先费 计算单元价格（以微 lamports 为单位）
+  SwapV1Out swap_response = 3; // 询价的返回
+  TxVersion tx_version = 4; // 交易版本（V0 或 LEGACY）
+  bool wrap_sol = 5; // 是否要封装为 sol
+  bool unwrap_sol = 6; // 是否要解封为 sol
+  string input_account = 7; // 可选 输入的 token 账户
+  string output_account = 8; // 可选 接收的 token 账户
+}
+
+// TxVersion 定义了交易的版本类型
+enum TxVersion {
+  V0 = 0; // 新版本交易格式
+  LEGACY = 1; // 旧版本交易格式
+}
+
+// CreateSwapTransactionResponse 返回生成的交易数据
+message CreateSwapTransactionResponse {
+  base.CommonResult result = 1;
+  repeated TransactionData data = 2; // 交易数据列表å
+}
+
+// TransactionData 表示单个交易数据
+message TransactionData {
+  string transaction = 1; // base64 编码的交易数据
+}

@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package query;
+
+// option java_multiple_files = true;
+// option java_package = "bb.byreal.dex";
+
+import "base/v1/model.proto";
+
+// GetContractInfoRequest 包含检查交易所需的数据
+message GetContractInfoRequest {
+  string input_mint = 1; // 输入的时间戳，用于标识特定的合约版本或状态
+}
+
+// GetContractResponse 是对GetContractRequest的响应，包含合约的相关信息
+message GetContractInfoResponse {
+  base.CommonResult result = 1;
+  string program_id = 2; // 合约的唯一标识符，用于识别特定的智能合约
+  int32 decimal = 3; // 合约相关的精度信息，通常用于表示资产的最小单位
+}
+
+// CheckTxRequest 包含检查交易所需的数据
+message CheckTxRequest {
+  repeated string pre_data = 1; // base64 of unsigned transactions
+  repeated string data = 2; // base64 of signed transactions
+  int64 user_sign_time = 3; // Unix timestamp in milliseconds or seconds
+}
+
+// CheckTxResponse 返回检查交易的结果
+message CheckTxResponse {
+  base.CommonResult result = 1;
+}
+
+message ListLinePositionRequest {
+  string pool_id = 1;
+}
+
+message ListLinePositionResponse {
+  base.CommonResult result = 1;
+  int64 count = 2;
+  repeated PointData data = 3;
+}
+
+message PointData {
+  string price = 1;
+  string liquidity = 2;
+  int64 tick = 3;
+}

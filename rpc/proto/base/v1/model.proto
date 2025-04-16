@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package base;
+
+message CommonResult
+{
+    // 返回码,0 成功，非0异常
+    int32 ret_code = 1;
+    // 返回码描述
+    string ret_msg = 2;
+}

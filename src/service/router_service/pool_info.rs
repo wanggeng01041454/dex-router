@@ -5,14 +5,18 @@ use std::{
 
 use anyhow::{Result, anyhow};
 use raydium_amm_v3::{
-  libraries::{U1024, liquidity_math, swap_math, tick_array_bit_map, tick_math},
-  states::{TICK_ARRAY_SEED, TickArrayBitmapExtension, TickArrayState, TickState},
+  libraries::{TICK_ARRAY_BITMAP_SIZE, U512, U1024, liquidity_math, swap_math, tick_array_bit_map, tick_math},
+  states::{
+    POOL_TICK_ARRAY_BITMAP_SEED, TICK_ARRAY_SEED, TICK_ARRAY_SIZE, TickArrayBitmapExtension, TickArrayState, TickState, tick_array,
+  },
 };
 use solana_sdk::pubkey::Pubkey;
 
 use crate::constants::BYREAL_CLMM_PROGRAM_ID;
 
 use super::types::PoolInfo;
+
+const EXTENSION_TICKARRAY_BITMAP_SIZE: usize = 14;
 
 // the top level state of the swap, the results of which are recorded in storage at the end
 #[derive(Debug)]
@@ -50,6 +54,120 @@ struct StepComputations {
 }
 
 impl PoolInfo {
+  pub fn tick_array_bitmap_extension_key(pool_id: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[POOL_TICK_ARRAY_BITMAP_SEED.as_bytes(), pool_id.as_ref()], &BYREAL_CLMM_PROGRAM_ID).0
+  }
+  /// 一个 tickArray 账户的 tick_count
+  pub fn get_tick_count_in_tick_array(tick_spacing: u16) -> i32 {
+    TICK_ARRAY_SIZE * i32::from(tick_spacing)
+  }
+
+  /// 一个 tickArray-bitmap 中的最大 tick 数
+  pub fn get_max_tick_in_tickarray_bitmap(tick_spacing: u16) -> i32 {
+    i32::from(tick_spacing) * TICK_ARRAY_SIZE * TICK_ARRAY_BITMAP_SIZE
+  }
+
+  pub fn calculate_all_tick_array_keys(
+    pool_id: &Pubkey,
+    tick_spacing: u16,
+    tick_array_bitmap: &[u64; 16],
+    tick_array_bitmap_extension: &TickArrayBitmapExtension,
+  ) -> Vec<Pubkey> {
+    let tick_count_in_tickarray_bitmap = Self::get_max_tick_in_tickarray_bitmap(tick_spacing);
+    let tick_count_in_tick_array = Self::get_tick_count_in_tick_array(tick_spacing);
+
+    let mut tick_array_keys = Vec::new();
+    // 扩展的左侧tick； tick_index < 0
+    // offset 代表 bitmap 的序号，从最大的开始， 最大的离的最远（对应的tick_index的绝对值越大）
+    for offset in (0..EXTENSION_TICKARRAY_BITMAP_SIZE).rev() {
+      let tick_array_bitmap = U512(tick_array_bitmap_extension.negative_tick_array_bitmap[offset]);
+
+      // 在当前的bitmap中，tick_index 的基数
+      let base_tick_index = -1 * (offset + 1) as i32 * tick_count_in_tickarray_bitmap;
+
+      for bitmap_inner_index in 0..TICK_ARRAY_BITMAP_SIZE {
+        if tick_array_bitmap.bit(bitmap_inner_index as usize) {
+          // 对应 raydium-clmm 源码中的这段代码：
+          // let m = tick_array_start_index.abs() % max_tick_in_tickarray_bitmap(tick_spacing);
+          // let mut tick_array_offset_in_bitmap = m / TickArrayState::tick_count(tick_spacing);
+          // if tick_array_start_index < 0 && m != 0 {
+          //     tick_array_offset_in_bitmap = TICK_ARRAY_BITMAP_SIZE - tick_array_offset_in_bitmap;
+          // }
+
+          let real_bitmap_inner_index =
+            if bitmap_inner_index != 0 { TICK_ARRAY_BITMAP_SIZE - bitmap_inner_index } else { bitmap_inner_index };
+          let mut start_tick_index = base_tick_index - real_bitmap_inner_index * tick_count_in_tick_array;
+
+          // 这里是对应
+          // if tick_index < 0 && tick_index.abs() % ticks_in_one_bitmap == 0 {
+          //   offset -= 1;
+          // }
+          if bitmap_inner_index == 0 {
+            start_tick_index -= tick_count_in_tickarray_bitmap;
+          }
+
+          // 上面这两段代码合起来的逻辑，等价于：
+          // let start_tick_index = base_tick_index - (TICK_ARRAY_BITMAP_SIZE - bitmap_inner_index) * tick_count_in_tick_array;
+
+          println!(
+            "extension negative offset:{}, bitmap_inner_index:{}, real_bitmap_inner_index:{}, start_tick_index:{}",
+            offset, bitmap_inner_index, real_bitmap_inner_index, start_tick_index
+          );
+          let tick_array_account_address = Self::get_pda_tick_array_address(pool_id, start_tick_index);
+          tick_array_keys.push(tick_array_account_address);
+        }
+      }
+    }
+
+    let tick_array_bitmap = U1024(*tick_array_bitmap);
+    //左侧tick
+    for i in 0..TICK_ARRAY_BITMAP_SIZE {
+      if tick_array_bitmap.bit(i as usize) {
+        // 这个bitmap对应的 tick_array_account 的 start_tick_index
+        let start_tick_index = (i - TICK_ARRAY_BITMAP_SIZE) * tick_count_in_tick_array;
+        println!("left tick, bitmap_index: {}, start_tick_index: {}", i, start_tick_index);
+
+        let tick_array_account_address = Self::get_pda_tick_array_address(pool_id, start_tick_index);
+        tick_array_keys.push(tick_array_account_address);
+      }
+    }
+
+    //右侧tick
+    for i in 0..TICK_ARRAY_BITMAP_SIZE {
+      if tick_array_bitmap.bit((i + TICK_ARRAY_BITMAP_SIZE) as usize) {
+        // 这个bitmap对应的 tick_array_account 的 start_tick_index
+        let start_tick_index = i * tick_count_in_tick_array;
+        println!("right tick, bitmap_index: {}, start_tick_index: {}", i, start_tick_index);
+
+        let tick_array_account_address = Self::get_pda_tick_array_address(pool_id, start_tick_index);
+        tick_array_keys.push(tick_array_account_address);
+      }
+    }
+
+    //扩展的右侧tick
+    for offset in 0..EXTENSION_TICKARRAY_BITMAP_SIZE {
+      let tick_array_bitmap = U512(tick_array_bitmap_extension.positive_tick_array_bitmap[offset]);
+
+      // 在当前的bitmap中，tick_index 的基数
+      let base_tick_index = (offset + 1) as i32 * tick_count_in_tickarray_bitmap;
+
+      for bitmap_inner_index in 0..TICK_ARRAY_BITMAP_SIZE {
+        if tick_array_bitmap.bit(bitmap_inner_index as usize) {
+          let start_tick_index = base_tick_index + bitmap_inner_index * tick_count_in_tick_array;
+
+          println!(
+            "extension postive offset:{}, bitmap_inner_index:{}, bitmap_inner_index:{}, start_tick_index:{}",
+            offset, bitmap_inner_index, bitmap_inner_index, start_tick_index
+          );
+          let tick_array_account_address = Self::get_pda_tick_array_address(pool_id, start_tick_index);
+          tick_array_keys.push(tick_array_account_address);
+        }
+      }
+    }
+
+    tick_array_keys
+  }
+
   //todo: 将需要的参数尽量存在 pool_info 中
   //todo: swap_compute 还需要返回的结果：输入代币还剩余多少，swap fee 用了多少， swap后的价格是多少
   /// 计算 swap 的结果
@@ -211,9 +329,9 @@ impl PoolInfo {
     Ok((state, tick_array_start_index_vec))
   }
 
-  pub fn get_pda_tick_array_address(&self, tick_array_start_index: i32) -> Pubkey {
+  pub fn get_pda_tick_array_address(pool_id: &Pubkey, tick_array_start_index: i32) -> Pubkey {
     Pubkey::find_program_address(
-      &[TICK_ARRAY_SEED.as_bytes(), self.base_info.id.as_ref(), &tick_array_start_index.to_be_bytes()],
+      &[TICK_ARRAY_SEED.as_bytes(), pool_id.as_ref(), &tick_array_start_index.to_be_bytes()],
       &BYREAL_CLMM_PROGRAM_ID,
     )
     .0
@@ -232,7 +350,7 @@ impl PoolInfo {
       }
     } else {
       // 反序遍历 tick-array
-      for i in (self.dynamic_info.all_tick_array_state.len() - 1)..=0 {
+      for i in (0..self.dynamic_info.all_tick_array_state.len()).rev() {
         let tick_array = &self.dynamic_info.all_tick_array_state[i];
         if tick_array.start_tick_index <= first_tick_array_start_index {
           tick_array_dequeue.push_back(tick_array.clone());
